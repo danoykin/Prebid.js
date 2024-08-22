@@ -276,6 +276,7 @@ function handleEvent(eventType, eventArgs) {
       pmEvent.width = eventArgs.width
       pmEvent.currency = eventArgs.currency
       pmEvent.bidder = eventArgs.bidder
+      viewObserver(eventArgs.adUnitCode)
       break
     }
     case EVENTS.BIDDER_DONE: {
@@ -320,6 +321,26 @@ function sendEvent(event) {
   if (event.eventType === EVENTS.AUCTION_END) {
     flush()
   }
+}
+
+function viewObserver(adUnitCode) {
+  let timeouts = {};
+  const observer = new IntersectionObserver((entries, ob) => {
+    for (const e of entries) {
+      if (e.isIntersecting) {
+        timeouts[e.target.id] = setTimeout(() => {
+          logInfo('+++++DIV ON DISPLAY+++++')
+          ob.unobserve(e.target);
+        }, 1000);
+      } else {
+        clearTimeout(timeouts[e.target.id]);
+      }
+    }
+  }, {threshold: 0.5})
+
+  document.querySelectorAll('#' + adUnitCode).forEach(el => {
+    observer.observe(el);
+  });
 }
 
 adapterManager.registerAnalyticsAdapter({
