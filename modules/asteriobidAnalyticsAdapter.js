@@ -35,7 +35,6 @@ let pageViewId
 let flushInterval
 let eventQueue = []
 let asteriobidAnalyticsEnabled = false
-let adUnitDictSent = false
 let prebidTimeout
 let adUnitCodeToBidFloor = {}
 let winningBids = {}
@@ -142,9 +141,8 @@ function flush() {
     if ('tcf_compliant' in initOptions) {
       data.tcf_compliant = initOptions.tcf_compliant
     }
-    if ('adUnitDict' in initOptions && !adUnitDictSent) {
+    if ('adUnitDict' in initOptions) {
       data.adUnitDict = initOptions.adUnitDict;
-      adUnitDictSent = true;
     }
     if ('customParam' in initOptions) {
       data.customParam = initOptions.customParam;
