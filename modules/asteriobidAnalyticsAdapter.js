@@ -1,16 +1,25 @@
-import { generateUUID, getParameterByName, logError, logInfo, parseUrl, deepClone, hasNonSerializableProperty } from '../src/utils.js'
-import { ajaxBuilder } from '../src/ajax.js'
+import {
+  deepAccess,
+  deepClone,
+  generateUUID,
+  getParameterByName,
+  hasNonSerializableProperty,
+  logError,
+  logInfo,
+  parseUrl
+} from '../src/utils.js'
+import {ajaxBuilder} from '../src/ajax.js'
 import adapter from '../libraries/analyticsAdapter/AnalyticsAdapter.js'
 import adapterManager from '../src/adapterManager.js'
-import { getStorageManager } from '../src/storageManager.js'
-import { EVENTS } from '../src/constants.js'
-import { MODULE_TYPE_ANALYTICS } from '../src/activities/modules.js'
+import {getStorageManager} from '../src/storageManager.js'
+import {EVENTS} from '../src/constants.js'
+import {MODULE_TYPE_ANALYTICS} from '../src/activities/modules.js'
 import {getRefererInfo} from '../src/refererDetection.js';
 
 /**
  * asteriobidAnalyticsAdapter.js - analytics adapter for AsterioBid
  */
-export const storage = getStorageManager({ moduleType: MODULE_TYPE_ANALYTICS, moduleName: 'asteriobid' })
+export const storage = getStorageManager({moduleType: MODULE_TYPE_ANALYTICS, moduleName: 'asteriobid'})
 const DEFAULT_EVENT_URL = 'https://endpt.asteriobid.com/endpoint'
 const analyticsType = 'endpoint'
 const analyticsName = 'AsterioBid Analytics'
@@ -26,9 +35,13 @@ let pageViewId
 let flushInterval
 let eventQueue = []
 let asteriobidAnalyticsEnabled = false
+let adUnitDictSent = false
+let prebidTimeout
+let adUnitCodeToBidFloor = {}
+let winningBids = {}
 
-let asteriobidAnalytics = Object.assign(adapter({ url: DEFAULT_EVENT_URL, analyticsType }), {
-  track({ eventType, args }) {
+let asteriobidAnalytics = Object.assign(adapter({url: DEFAULT_EVENT_URL, analyticsType}), {
+  track({eventType, args}) {
     handleEvent(eventType, args)
   }
 })
@@ -118,7 +131,8 @@ function flush() {
       events: eventQueue,
       utmTags: collectUtmTagData(),
       pageInfo: collectPageInfo(),
-      sampling: sampling
+      sampling: sampling,
+      prebidTimeout: prebidTimeout
     }
     eventQueue = []
 
@@ -128,8 +142,9 @@ function flush() {
     if ('tcf_compliant' in initOptions) {
       data.tcf_compliant = initOptions.tcf_compliant
     }
-    if ('adUnitDict' in initOptions) {
+    if ('adUnitDict' in initOptions && !adUnitDictSent) {
       data.adUnitDict = initOptions.adUnitDict;
+      adUnitDictSent = true;
     }
     if ('customParam' in initOptions) {
       data.customParam = initOptions.customParam;
@@ -173,6 +188,8 @@ function trimBid(bid) {
   res.adUnitCode = bid.adUnitCode
   res.bidRequestsCount = bid.bidRequestsCount
   res.serverResponseTimeMs = bid.serverResponseTimeMs
+  res.bidFloor = getBidFloor(bid)
+  adUnitCodeToBidFloor[bid.adUnitCode] = adUnitCodeToBidFloor[bid.adUnitCode] || res.bidFloor
   return res
 }
 
@@ -197,6 +214,7 @@ function handleEvent(eventType, eventArgs) {
   } else {
     eventArgs = {}
   }
+  prebidTimeout = prebidTimeout ?? eventArgs?.timeout;
 
   const pmEvent = {}
   pmEvent.timestamp = eventArgs.timestamp || Date.now()
@@ -205,7 +223,6 @@ function handleEvent(eventType, eventArgs) {
   switch (eventType) {
     case EVENTS.AUCTION_INIT: {
       pmEvent.auctionId = eventArgs.auctionId
-      pmEvent.timeout = eventArgs.timeout
       pmEvent.adUnits = eventArgs.adUnits && eventArgs.adUnits.map(trimAdUnit)
       pmEvent.bidderRequests = eventArgs.bidderRequests && eventArgs.bidderRequests.map(trimBidderRequest)
       auctionStarts[pmEvent.auctionId] = pmEvent.timestamp
@@ -220,6 +237,7 @@ function handleEvent(eventType, eventArgs) {
       pmEvent.bidsReceived = eventArgs.bidsReceived && eventArgs.bidsReceived.map(trimBid)
       pmEvent.start = auctionStarts[pmEvent.auctionId]
       pmEvent.end = Date.now()
+      pmEvent.adUnitCodeToBidFloor = adUnitCodeToBidFloor
       break
     }
     case EVENTS.BID_ADJUSTMENT: {
@@ -238,7 +256,6 @@ function handleEvent(eventType, eventArgs) {
       pmEvent.bidderRequestId = eventArgs.bidderRequestId
       pmEvent.bids = eventArgs.bids && eventArgs.bids.map(trimBid)
       pmEvent.auctionStart = eventArgs.auctionStart
-      pmEvent.timeout = eventArgs.timeout
       break
     }
     case EVENTS.BID_RESPONSE: {
@@ -258,6 +275,7 @@ function handleEvent(eventType, eventArgs) {
       pmEvent.netRevenue = eventArgs.netRevenue
       pmEvent.size = eventArgs.size
       pmEvent.adserverTargeting = eventArgs.adserverTargeting
+      pmEvent.bidFloor = getBidFloor(eventArgs)
       break
     }
     case EVENTS.BID_WON: {
@@ -276,7 +294,9 @@ function handleEvent(eventType, eventArgs) {
       pmEvent.width = eventArgs.width
       pmEvent.currency = eventArgs.currency
       pmEvent.bidder = eventArgs.bidder
+      pmEvent.bidFloor = getBidFloor(eventArgs)
       viewObserver(eventArgs.adUnitCode)
+      winningBids[eventArgs.adUnitCode] = eventArgs
       break
     }
     case EVENTS.BIDDER_DONE: {
@@ -287,7 +307,6 @@ function handleEvent(eventType, eventArgs) {
       pmEvent.bids = eventArgs.bids && eventArgs.bids.map(trimBid)
       pmEvent.doneCbCallCount = eventArgs.doneCbCallCount
       pmEvent.start = eventArgs.start
-      pmEvent.timeout = eventArgs.timeout
       pmEvent.tid = eventArgs.tid
       pmEvent.src = eventArgs.src
       break
@@ -314,6 +333,26 @@ function handleEvent(eventType, eventArgs) {
   sendEvent(pmEvent)
 }
 
+function handleViewEvent(adUnitCode) {
+  const eventArgs = winningBids[adUnitCode]
+  const pmEvent = {}
+  pmEvent.timestamp = Date.now()
+  pmEvent.eventType = 'adView'
+  pmEvent.auctionId = eventArgs.auctionId;
+  pmEvent.adId = eventArgs.adId;
+  pmEvent.adserverTargeting = eventArgs.adserverTargeting;
+  pmEvent.adUnitCode = eventArgs.adUnitCode;
+  pmEvent.bidderCode = eventArgs.bidderCode;
+  pmEvent.height = eventArgs.height;
+  pmEvent.mediaType = eventArgs.mediaType;
+  pmEvent.size = eventArgs.size;
+  pmEvent.width = eventArgs.width;
+  pmEvent.currency = eventArgs.currency;
+  pmEvent.bidder = eventArgs.bidder;
+  pmEvent.bidFloor = getBidFloor(eventArgs);
+  sendEvent(pmEvent)
+}
+
 function sendEvent(event) {
   eventQueue.push(event)
   logInfo(`${analyticsName} Event ${event.eventType}:`, event)
@@ -329,7 +368,7 @@ function viewObserver(adUnitCode) {
     for (const e of entries) {
       if (e.isIntersecting) {
         timeouts[e.target.id] = setTimeout(() => {
-          logInfo('+++++DIV ON DISPLAY+++++')
+          handleViewEvent(adUnitCode)
           ob.unobserve(e.target);
         }, 1000);
       } else {
@@ -341,6 +380,33 @@ function viewObserver(adUnitCode) {
   document.querySelectorAll('#' + adUnitCode).forEach(el => {
     observer.observe(el);
   });
+}
+
+function getBidFloor(bid) {
+  const formatTypes = getFormatType(bid)
+  let minFloor
+  if (typeof bid.getFloor === 'function') {
+    formatTypes.forEach(formatType => {
+      (bid.sizes || [[bid.height, bid.width]]).forEach(bidFloorSize => {
+        const floor = bid.getFloor({currency: 'USD', mediaType: formatType.toLowerCase(), size: bidFloorSize});
+        if (floor && !isNaN(floor.floor) && (floor.currency === 'USD')) {
+          minFloor = !minFloor || floor.floor < minFloor ? floor.floor : minFloor
+        }
+      })
+    });
+    adUnitCodeToBidFloor[bid.adUnitCode] = adUnitCodeToBidFloor[bid.adUnitCode] || minFloor
+  } else {
+    minFloor = adUnitCodeToBidFloor[bid.adUnitCode]
+  }
+  return minFloor || bid.params.bidFloor || bid.params?.[0]?.bidFloor;
+}
+
+const getFormatType = bidRequest => {
+  let formats = []
+  if (deepAccess(bidRequest, 'mediaTypes.banner')) formats.push('Banner')
+  if (deepAccess(bidRequest, 'mediaTypes.video')) formats.push('Video')
+  if (bidRequest.mediaType) formats.push(bidRequest.mediaType);
+  return formats
 }
 
 adapterManager.registerAnalyticsAdapter({
