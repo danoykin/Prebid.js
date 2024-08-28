@@ -361,6 +361,10 @@ function sendEvent(event) {
 }
 
 function viewObserver(adUnitCode) {
+  let containerId = adUnitCode;
+  if ('adContainers' in initOptions) {
+    containerId = initOptions.adContainers[adUnitCode] || containerId;
+  }
   let timeouts = {};
   const observer = new IntersectionObserver((entries, ob) => {
     for (const e of entries) {
@@ -375,7 +379,7 @@ function viewObserver(adUnitCode) {
     }
   }, {threshold: 0.5})
 
-  document.querySelectorAll('#' + adUnitCode).forEach(el => {
+  document.querySelectorAll('#' + containerId).forEach(el => {
     observer.observe(el);
   });
 }
