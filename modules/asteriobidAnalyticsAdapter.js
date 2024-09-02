@@ -38,6 +38,7 @@ let asteriobidAnalyticsEnabled = false
 let prebidTimeout
 let adUnitCodeToBidFloor = {}
 let winningBids = {}
+let siteCat
 
 let asteriobidAnalytics = Object.assign(adapter({url: DEFAULT_EVENT_URL, analyticsType}), {
   track({eventType, args}) {
@@ -131,7 +132,8 @@ function flush() {
       utmTags: collectUtmTagData(),
       pageInfo: collectPageInfo(),
       sampling: sampling,
-      prebidTimeout: prebidTimeout
+      prebidTimeout: prebidTimeout,
+      siteCat: siteCat
     }
     eventQueue = []
 
@@ -193,6 +195,7 @@ function trimBid(bid) {
 
 function trimBidderRequest(bidderRequest) {
   if (!bidderRequest) return bidderRequest
+  siteCat = bidderRequest.ortb2?.site?.cat
   const res = {}
   res.auctionId = bidderRequest.auctionId
   res.auctionStart = bidderRequest.auctionStart
@@ -400,7 +403,7 @@ function getBidFloor(bid) {
   } else {
     minFloor = adUnitCodeToBidFloor[bid.adUnitCode]
   }
-  return minFloor || bid.params.bidFloor || bid.params?.[0]?.bidFloor;
+  return minFloor || bid.params?.bidFloor || bid.params?.[0]?.bidFloor;
 }
 
 const getFormatType = bidRequest => {
