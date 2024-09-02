@@ -38,7 +38,7 @@ let asteriobidAnalyticsEnabled = false
 let prebidTimeout
 let adUnitCodeToBidFloor = {}
 let winningBids = {}
-let siteCat
+let category = {}
 
 let asteriobidAnalytics = Object.assign(adapter({url: DEFAULT_EVENT_URL, analyticsType}), {
   track({eventType, args}) {
@@ -133,7 +133,7 @@ function flush() {
       pageInfo: collectPageInfo(),
       sampling: sampling,
       prebidTimeout: prebidTimeout,
-      siteCat: siteCat
+      category: (category.cat || category.pagecat || category.sectioncat) ? category : undefined
     }
     eventQueue = []
 
@@ -195,7 +195,9 @@ function trimBid(bid) {
 
 function trimBidderRequest(bidderRequest) {
   if (!bidderRequest) return bidderRequest
-  siteCat = bidderRequest.ortb2?.site?.cat
+  category.cat = bidderRequest.ortb2?.site?.cat
+  category.sectioncat = bidderRequest.ortb2?.site?.sectioncat
+  category.pagecat = bidderRequest.ortb2?.site?.pagecat
   const res = {}
   res.auctionId = bidderRequest.auctionId
   res.auctionStart = bidderRequest.auctionStart
