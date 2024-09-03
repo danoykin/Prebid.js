@@ -6,7 +6,7 @@ import {MODULE_TYPE_RTD} from '../src/activities/modules.js';
 
 const MODULE_NAME = 'realTimeData';
 const SUBMODULE_NAME = 'asteriocatRtdProvider';
-const DEFAULT_ENDPOINT = 'http://localhost:8080/support/getCategory';
+const DEFAULT_ENDPOINT = 'https://asteriocat.com';
 
 export const storage = getStorageManager({moduleType: MODULE_TYPE_RTD, moduleName: SUBMODULE_NAME});
 
