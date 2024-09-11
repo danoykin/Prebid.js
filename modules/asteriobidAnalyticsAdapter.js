@@ -8,18 +8,18 @@ import {
   logInfo,
   parseUrl
 } from '../src/utils.js'
-import {ajaxBuilder} from '../src/ajax.js'
+import { ajaxBuilder } from '../src/ajax.js'
 import adapter from '../libraries/analyticsAdapter/AnalyticsAdapter.js'
 import adapterManager from '../src/adapterManager.js'
-import {getStorageManager} from '../src/storageManager.js'
-import {EVENTS} from '../src/constants.js'
-import {MODULE_TYPE_ANALYTICS} from '../src/activities/modules.js'
-import {getRefererInfo} from '../src/refererDetection.js';
+import { getStorageManager } from '../src/storageManager.js'
+import { EVENTS } from '../src/constants.js'
+import { MODULE_TYPE_ANALYTICS } from '../src/activities/modules.js'
+import { getRefererInfo } from '../src/refererDetection.js'
 
 /**
  * asteriobidAnalyticsAdapter.js - analytics adapter for AsterioBid
  */
-export const storage = getStorageManager({moduleType: MODULE_TYPE_ANALYTICS, moduleName: 'asteriobid'})
+export const storage = getStorageManager({ moduleType: MODULE_TYPE_ANALYTICS, moduleName: 'asteriobid' })
 const DEFAULT_EVENT_URL = 'https://endpt.asteriobid.com/endpoint'
 const analyticsType = 'endpoint'
 const analyticsName = 'AsterioBid Analytics'
@@ -28,26 +28,22 @@ const _VERSION = 1
 
 let ajax = ajaxBuilder(20000)
 let initOptions
-let auctionStarts = {}
 let auctionTimeouts = {}
 let sampling
 let pageViewId
 let flushInterval
 let eventQueue = []
 let asteriobidAnalyticsEnabled = false
-let prebidTimeout
-let adUnitCodeToBidFloor = {}
-let winningBids = {}
-let category = {}
+let auctionInfo = {}
 
-let asteriobidAnalytics = Object.assign(adapter({url: DEFAULT_EVENT_URL, analyticsType}), {
-  track({eventType, args}) {
+let asteriobidAnalytics = Object.assign(adapter({ url: DEFAULT_EVENT_URL, analyticsType }), {
+  track({ eventType, args }) {
     handleEvent(eventType, args)
   }
 })
 
 asteriobidAnalytics.originEnableAnalytics = asteriobidAnalytics.enableAnalytics
-asteriobidAnalytics.enableAnalytics = function (config) {
+asteriobidAnalytics.enableAnalytics = function(config) {
   initOptions = config.options || {}
 
   pageViewId = initOptions.pageViewId || generateUUID()
@@ -64,7 +60,7 @@ asteriobidAnalytics.enableAnalytics = function (config) {
 }
 
 asteriobidAnalytics.originDisableAnalytics = asteriobidAnalytics.disableAnalytics
-asteriobidAnalytics.disableAnalytics = function () {
+asteriobidAnalytics.disableAnalytics = function() {
   if (!asteriobidAnalyticsEnabled) {
     return
   }
@@ -77,7 +73,7 @@ function collectUtmTagData() {
   let newUtm = false
   let pmUtmTags = {}
   try {
-    utmTags.forEach(function (utmKey) {
+    utmTags.forEach(function(utmKey) {
       let utmValue = getParameterByName(utmKey)
       if (utmValue !== '') {
         newUtm = true
@@ -85,14 +81,14 @@ function collectUtmTagData() {
       pmUtmTags[utmKey] = utmValue
     })
     if (newUtm === false) {
-      utmTags.forEach(function (utmKey) {
+      utmTags.forEach(function(utmKey) {
         let itemValue = storage.getDataFromLocalStorage(`pm_${utmKey}`)
         if (itemValue && itemValue.length !== 0) {
           pmUtmTags[utmKey] = itemValue
         }
       })
     } else {
-      utmTags.forEach(function (utmKey) {
+      utmTags.forEach(function(utmKey) {
         storage.setDataInLocalStorage(`pm_${utmKey}`, pmUtmTags[utmKey])
       })
     }
@@ -105,7 +101,7 @@ function collectUtmTagData() {
 
 function collectPageInfo() {
   const pageInfo = {
-    domain: window.location.hostname,
+    domain: window.location.hostname
   }
   if (document.referrer) {
     pageInfo.referrerDomain = parseUrl(document.referrer).hostname
@@ -133,7 +129,7 @@ function flush() {
       pageInfo: collectPageInfo(),
       sampling: sampling,
       prebidTimeout: prebidTimeout,
-      category: (category.cat || category.pagecat || category.sectioncat) ? category : undefined
+      category: category
     }
     eventQueue = []
 
@@ -144,10 +140,10 @@ function flush() {
       data.tcf_compliant = initOptions.tcf_compliant
     }
     if ('adUnitDict' in initOptions) {
-      data.adUnitDict = initOptions.adUnitDict;
+      data.adUnitDict = initOptions.adUnitDict
     }
     if ('customParam' in initOptions) {
-      data.customParam = initOptions.customParam;
+      data.customParam = initOptions.customParam
     }
 
     const url = initOptions.url ? initOptions.url : DEFAULT_EVENT_URL
@@ -188,16 +184,12 @@ function trimBid(bid) {
   res.adUnitCode = bid.adUnitCode
   res.bidRequestsCount = bid.bidRequestsCount
   res.serverResponseTimeMs = bid.serverResponseTimeMs
-  res.bidFloor = getBidFloor(bid)
-  adUnitCodeToBidFloor[bid.adUnitCode] = adUnitCodeToBidFloor[bid.adUnitCode] || res.bidFloor
   return res
 }
 
 function trimBidderRequest(bidderRequest) {
   if (!bidderRequest) return bidderRequest
-  category.cat = bidderRequest.ortb2?.site?.cat
-  category.sectioncat = bidderRequest.ortb2?.site?.sectioncat
-  category.pagecat = bidderRequest.ortb2?.site?.pagecat
+
   const res = {}
   res.auctionId = bidderRequest.auctionId
   res.auctionStart = bidderRequest.auctionStart
@@ -217,7 +209,26 @@ function handleEvent(eventType, eventArgs) {
   } else {
     eventArgs = {}
   }
-  prebidTimeout = prebidTimeout ?? eventArgs?.timeout;
+
+  let item;
+  if (eventArgs.auctionId) {
+    item = getItem(auctionInfo, bidderRequest.auctionId)
+    if (!item.timeout && eventArgs.timeout) {
+      item.timeout = eventArgs.timeout
+    }
+
+    if (eventArgs.adUnitCode) {
+      const subItem = getSubItem(auctionInfo, eventArgs.auctionId, 'adUnits', eventArgs.adUnitCode)
+      if (!subItem.bidFloor) {
+        subItem.bidFloor = getBidFloor(eventArgs)
+      }
+      if (!subItem.category) {
+        subItem.category = getCategory(bidderRequest)
+      }
+    }
+  }
+
+  console.log('Event: ' + eventType, eventArgs)
 
   const pmEvent = {}
   pmEvent.timestamp = eventArgs.timestamp || Date.now()
@@ -228,8 +239,17 @@ function handleEvent(eventType, eventArgs) {
       pmEvent.auctionId = eventArgs.auctionId
       pmEvent.adUnits = eventArgs.adUnits && eventArgs.adUnits.map(trimAdUnit)
       pmEvent.bidderRequests = eventArgs.bidderRequests && eventArgs.bidderRequests.map(trimBidderRequest)
-      auctionStarts[pmEvent.auctionId] = pmEvent.timestamp
-      auctionTimeouts[pmEvent.auctionId] = pmEvent.timeout
+
+      eventArgs.bidderRequests && eventArgs.bidderRequests.forEach(bidderRequest => {
+        const subItem = getSubItem(auctionInfo, bidderRequest.auctionId, 'adUnits', bidderRequest.adUnitId)
+        if (!subItem.category) {
+          subItem.category = getCategory(bidderRequest)
+        }
+      })
+
+      if (item) {
+        item.start = pmEvent.timestamp
+      }
       break
     }
     case EVENTS.AUCTION_END: {
@@ -238,9 +258,8 @@ function handleEvent(eventType, eventArgs) {
       pmEvent.start = eventArgs.start
       pmEvent.adUnitCodes = eventArgs.adUnitCodes
       pmEvent.bidsReceived = eventArgs.bidsReceived && eventArgs.bidsReceived.map(trimBid)
-      pmEvent.start = auctionStarts[pmEvent.auctionId]
       pmEvent.end = Date.now()
-      pmEvent.adUnitCodeToBidFloor = adUnitCodeToBidFloor
+      pmEvent.start = item?.start
       break
     }
     case EVENTS.BID_ADJUSTMENT: {
@@ -248,7 +267,6 @@ function handleEvent(eventType, eventArgs) {
     }
     case EVENTS.BID_TIMEOUT: {
       pmEvent.bidders = eventArgs && eventArgs.map ? eventArgs.map(trimBid) : eventArgs
-      pmEvent.duration = auctionTimeouts[pmEvent.auctionId]
       break
     }
     case EVENTS.BID_REQUESTED: {
@@ -278,7 +296,6 @@ function handleEvent(eventType, eventArgs) {
       pmEvent.netRevenue = eventArgs.netRevenue
       pmEvent.size = eventArgs.size
       pmEvent.adserverTargeting = eventArgs.adserverTargeting
-      pmEvent.bidFloor = getBidFloor(eventArgs)
       break
     }
     case EVENTS.BID_WON: {
@@ -297,9 +314,8 @@ function handleEvent(eventType, eventArgs) {
       pmEvent.width = eventArgs.width
       pmEvent.currency = eventArgs.currency
       pmEvent.bidder = eventArgs.bidder
-      pmEvent.bidFloor = getBidFloor(eventArgs)
-      viewObserver(eventArgs.adUnitCode)
-      winningBids[eventArgs.adUnitCode] = eventArgs
+
+      initViewObserver(eventArgs.adUnitCode, eventArgs)
       break
     }
     case EVENTS.BIDDER_DONE: {
@@ -336,27 +352,27 @@ function handleEvent(eventType, eventArgs) {
   sendEvent(pmEvent)
 }
 
-function handleViewEvent(adUnitCode) {
-  const eventArgs = winningBids[adUnitCode]
+function handleViewEvent(adUnitCode, eventArgs) {
   const pmEvent = {}
   pmEvent.timestamp = Date.now()
   pmEvent.eventType = 'adView'
-  pmEvent.auctionId = eventArgs.auctionId;
-  pmEvent.adId = eventArgs.adId;
-  pmEvent.adserverTargeting = eventArgs.adserverTargeting;
-  pmEvent.adUnitCode = eventArgs.adUnitCode;
-  pmEvent.bidderCode = eventArgs.bidderCode;
-  pmEvent.height = eventArgs.height;
-  pmEvent.mediaType = eventArgs.mediaType;
-  pmEvent.size = eventArgs.size;
-  pmEvent.width = eventArgs.width;
-  pmEvent.currency = eventArgs.currency;
-  pmEvent.bidder = eventArgs.bidder;
-  pmEvent.bidFloor = getBidFloor(eventArgs);
+  pmEvent.auctionId = eventArgs.auctionId
+  pmEvent.adId = eventArgs.adId
+  pmEvent.adserverTargeting = eventArgs.adserverTargeting
+  pmEvent.adUnitCode = eventArgs.adUnitCode
+  pmEvent.bidderCode = eventArgs.bidderCode
+  pmEvent.height = eventArgs.height
+  pmEvent.mediaType = eventArgs.mediaType
+  pmEvent.size = eventArgs.size
+  pmEvent.width = eventArgs.width
+  pmEvent.currency = eventArgs.currency
+  pmEvent.bidder = eventArgs.bidder
   sendEvent(pmEvent)
 }
 
 function sendEvent(event) {
+  event.bidFloor = getBidFloorByAuctionAdUnit(event.auctionId, event.adUnitCode)
+
   eventQueue.push(event)
   logInfo(`${analyticsName} Event ${event.eventType}:`, event)
 
@@ -365,54 +381,73 @@ function sendEvent(event) {
   }
 }
 
-function viewObserver(adUnitCode) {
-  let containerId = adUnitCode;
+function initViewObserver(adUnitCode, eventArgs) {
+  let containerId = adUnitCode
   if ('adContainers' in initOptions) {
-    containerId = initOptions.adContainers[adUnitCode] || containerId;
+    containerId = initOptions.adContainers[adUnitCode] || containerId
   }
-  let timeouts = {};
+  let timeouts = {}
   const observer = new IntersectionObserver((entries, ob) => {
     for (const e of entries) {
       if (e.isIntersecting) {
         timeouts[e.target.id] = setTimeout(() => {
-          handleViewEvent(adUnitCode)
-          ob.unobserve(e.target);
-        }, 1000);
+          handleViewEvent(adUnitCode, eventArgs)
+          ob.unobserve(e.target)
+        }, 1000)
       } else {
-        clearTimeout(timeouts[e.target.id]);
+        clearTimeout(timeouts[e.target.id])
       }
     }
-  }, {threshold: 0.5})
+  }, { threshold: 0.5 })
 
   document.querySelectorAll('#' + containerId).forEach(el => {
-    observer.observe(el);
-  });
+    observer.observe(el)
+  })
+}
+
+function getItem(data, id) {
+  let item = data[id]
+  if (!item) {
+    item = {}
+    data[id] = item
+  }
+  return item
+}
+
+function getSubItem(data, id, name, id2) {
+  let item = getItem(data, id)
+  if (!item[name]) {
+    item[name] = {}
+  }
+  return getItem(item[name], id2)
 }
 
 function getBidFloor(bid) {
-  const formatTypes = getFormatType(bid)
-  let minFloor
-  if (typeof bid.getFloor === 'function') {
-    formatTypes.forEach(formatType => {
-      (bid.sizes || [[bid.height, bid.width]]).forEach(bidFloorSize => {
-        const floor = bid.getFloor({currency: 'USD', mediaType: formatType.toLowerCase(), size: bidFloorSize});
-        if (floor && !isNaN(floor.floor) && (floor.currency === 'USD')) {
-          minFloor = !minFloor || floor.floor < minFloor ? floor.floor : minFloor
-        }
-      })
-    });
-    adUnitCodeToBidFloor[bid.adUnitCode] = adUnitCodeToBidFloor[bid.adUnitCode] || minFloor
-  } else {
-    minFloor = adUnitCodeToBidFloor[bid.adUnitCode]
+  if (bid.floorData) {
+    return { currency: bid.floorData.floorCurrency, value: bid.floorData.floorValue }
   }
-  return minFloor || bid.params?.bidFloor || bid.params?.[0]?.bidFloor;
+  return undefined
+}
+
+function getCategory(eventArgs) {
+  const site = eventArgs.ortb2?.site
+  if (site && (site.cat || site.sectioncat || site.pagecat)) {
+    return {
+      cat: site.cat,
+      sectioncat: site.sectioncat,
+      pagecat: site.pagecat,
+      asteriocat: site.ext?.asteriocat
+    }
+  } else {
+    return undefined;
+  }
 }
 
 const getFormatType = bidRequest => {
   let formats = []
   if (deepAccess(bidRequest, 'mediaTypes.banner')) formats.push('Banner')
   if (deepAccess(bidRequest, 'mediaTypes.video')) formats.push('Video')
-  if (bidRequest.mediaType) formats.push(bidRequest.mediaType);
+  if (bidRequest.mediaType) formats.push(bidRequest.mediaType)
   return formats
 }
 
@@ -421,7 +456,7 @@ adapterManager.registerAnalyticsAdapter({
   code: 'asteriobid'
 })
 
-asteriobidAnalytics.getOptions = function () {
+asteriobidAnalytics.getOptions = function() {
   return initOptions
 }
 
