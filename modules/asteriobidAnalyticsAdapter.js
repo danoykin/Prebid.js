@@ -174,17 +174,16 @@ function fillFromBid(bid, res) {
     res.bidder = bid.bidder
     res.bidderRequestId = bid.bidderRequestId
     res.bidId = bid.bidId
-  res.crumbs = bid.crumbs
-  res.cpm = bid.cpm
-  res.currency = bid.currency
-  res.mediaTypes = bid.mediaTypes
-  res.sizes = bid.sizes
-  res.transactionId = bid.transactionId
-  res.adUnitCode = bid.adUnitCode
-  res.bidRequestsCount = bid.bidRequestsCount
-  res.serverResponseTimeMs = bid.serverResponseTimeMs
-
-
+    res.crumbs = bid.crumbs
+    res.cpm = bid.cpm
+    res.currency = bid.currency
+    res.mediaTypes = bid.mediaTypes
+    res.sizes = bid.sizes
+    res.transactionId = bid.transactionId
+    res.adUnitCode = bid.adUnitCode
+    res.bidRequestsCount = bid.bidRequestsCount
+    res.serverResponseTimeMs = bid.serverResponseTimeMs
+  }
 
   pmEvent.bidderCode = eventArgs.bidderCode
   pmEvent.height = eventArgs.height
